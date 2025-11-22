@@ -1863,6 +1863,107 @@ public:
     }
 };
 
+class reactor_backend_asymmetric_uring final : public reactor_backend {
+public:
+    ~reactor_backend_asymmetric_uring() {
+    }
+
+    virtual bool reap_kernel_completions() override {
+        return false;
+    }
+
+    virtual bool kernel_submit_work() override {
+        return false;
+    }
+
+    virtual bool kernel_events_can_sleep() const override {
+        return true;
+    }
+
+    virtual void wait_and_process_events(const sigset_t* active_sigmask) override {
+    }
+
+    virtual future<> readable(pollable_fd_state& fd) override {
+        return make_ready_future<>();
+    }
+
+    virtual future<> writeable(pollable_fd_state& fd) override {
+        return make_ready_future<>();
+    }
+
+    virtual future<> readable_or_writeable(pollable_fd_state& fd) override {
+        return make_ready_future<>();
+    }
+
+    virtual future<> poll_rdhup(pollable_fd_state& fd) override {
+        return make_ready_future<>();
+    }
+
+    virtual void forget(pollable_fd_state& fd) noexcept override {
+    }
+
+    virtual future<std::tuple<pollable_fd, socket_address>> accept(pollable_fd_state& listenfd) override {
+        return make_ready_future<std::tuple<pollable_fd, socket_address>>();
+    }
+
+    virtual future<> connect(pollable_fd_state& fd, socket_address& sa) override {
+        return make_ready_future<>();
+    }
+
+    virtual future<size_t> read(pollable_fd_state& fd, void* buffer, size_t len) override {
+        return make_ready_future<size_t>();
+    }
+
+    virtual future<size_t> recvmsg(pollable_fd_state& fd, const std::vector<iovec>& iov) override {
+        return make_ready_future<size_t>();
+    }
+
+    virtual future<temporary_buffer<char>> read_some(pollable_fd_state& fd, internal::buffer_allocator* ba) override {
+        return make_ready_future<temporary_buffer<char>>();
+    }
+
+    virtual future<size_t> sendmsg(pollable_fd_state& fd, std::span<iovec> iovs, size_t len) final {
+        return make_ready_future<size_t>();
+    }
+
+    virtual future<size_t> send(pollable_fd_state& fd, const void* buffer, size_t len) override {
+        return make_ready_future<size_t>();
+    }
+
+    virtual future<temporary_buffer<char>> recv_some(pollable_fd_state& fd, internal::buffer_allocator* ba) override {
+        return make_ready_future<temporary_buffer<char>>();
+    }
+
+    virtual bool do_blocking_io() const override {
+        return false;
+    }
+
+    virtual void signal_received(int signo, siginfo_t* siginfo, void* ignore) override {
+    }
+
+    virtual void start_tick() override {
+    }
+
+    virtual void stop_tick() override {
+    }
+
+    virtual void arm_highres_timer(const ::itimerspec& its) override {
+    }
+
+    virtual void reset_preemption_monitor() override {
+    }
+
+    virtual void request_preemption() override {
+    }
+
+    virtual void start_handling_signal() override {
+    }
+
+    virtual pollable_fd_state_ptr make_pollable_fd_state(file_desc fd, pollable_fd::speculation speculate) override {
+        return pollable_fd_state_ptr(nullptr);
+    }
+};
+
 #endif
 
 static bool detect_aio_poll() {
