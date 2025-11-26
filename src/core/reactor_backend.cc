@@ -2080,7 +2080,35 @@ public:
     }
 
     virtual future<> connect(pollable_fd_state& fd, socket_address& sa) override {
-        return make_ready_future<>();
+        class connect_completion final : public io_completion {
+            pollable_fd_state& _fd;
+            socket_address _sa;
+            promise<> _result;
+        public:
+            connect_completion(pollable_fd_state& fd, const socket_address& sa)
+                : _fd(fd), _sa(sa) {}
+            void complete(size_t fd) noexcept final {
+                _fd.speculate_epoll(POLLOUT);
+                _result.set_value();
+                delete this;
+            }
+            void set_exception(std::exception_ptr eptr) noexcept final {
+                _result.set_exception(eptr);
+                delete this;
+            }
+            future<> get_future() {
+                return _result.get_future();
+            }
+            ::sockaddr* posix_sockaddr() {
+                return &_sa.as_posix_sockaddr();
+            }
+            socklen_t socklen() const {
+                return _sa.addr_length;
+            }
+        };
+        auto desc = std::make_unique<connect_completion>(fd, sa);
+        auto req = internal::io_request::make_connect(fd.fd.get(), desc->posix_sockaddr(), desc->socklen());
+        return submit_request(std::move(desc), req);    
     }
 
     virtual future<size_t> read(pollable_fd_state& fd, void* buffer, size_t len) override {
