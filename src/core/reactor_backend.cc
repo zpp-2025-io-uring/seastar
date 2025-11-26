@@ -2185,7 +2185,26 @@ public:
         return submit_request(std::move(desc), std::move(req));
     }
     virtual future<size_t> read(pollable_fd_state& fd, void* buffer, size_t len) override {
-        return _r.do_read(fd, buffer, len);
+        class read_completion final : public io_completion {
+            promise<size_t> _result;
+        public:
+            read_completion() {}
+            void complete(size_t bytes) noexcept final {
+                _result.set_value(bytes);
+                delete this;
+            }
+            void set_exception(std::exception_ptr eptr) noexcept final {
+                _result.set_exception(eptr);
+                delete this;
+            }
+            future<size_t> get_future() {
+                return _result.get_future();
+            }
+        };
+        auto desc = std::make_unique<read_completion>();
+        const uint64_t position_file_offset = -1;
+        auto req = internal::io_request::make_read(fd.fd.get(), position_file_offset, buffer, len, false);
+        return submit_request(std::move(desc), std::move(req));
     }
     virtual future<size_t> recvmsg(pollable_fd_state& fd, const std::vector<iovec>& iov) override {
         if (fd.take_speculation(POLLIN)) {
