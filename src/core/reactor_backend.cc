@@ -2036,7 +2036,47 @@ public:
     }
 
     virtual future<std::tuple<pollable_fd, socket_address>> accept(pollable_fd_state& listenfd) override {
-        return make_ready_future<std::tuple<pollable_fd, socket_address>>();
+        class accept_completion final : public io_completion {
+            pollable_fd_state& _listenfd;
+            socket_address _sa;
+            promise<std::tuple<pollable_fd, socket_address>> _result;
+        public:
+            accept_completion(pollable_fd_state& listenfd)
+                : _listenfd(listenfd) {}
+            void complete(size_t fd) noexcept final {
+                pollable_fd pfd(file_desc::from_fd(fd));
+                _result.set_value(std::move(pfd), std::move(_sa));
+                delete this;
+            }
+            void set_exception(std::exception_ptr eptr) noexcept final {
+                try {
+                    std::rethrow_exception(eptr);
+                } catch (const std::system_error& e) {
+                    if (e.code() == std::errc::invalid_argument) {
+                        try {
+                            // The chances are that we shutting down the connection.
+                            _listenfd.maybe_no_more_recv();
+                        } catch (...) {
+                            eptr = std::current_exception();
+                        }
+                    }
+                } catch (...) {}
+                _result.set_exception(eptr);
+                delete this;
+            }
+            future<std::tuple<pollable_fd, socket_address>> get_future() {
+                return _result.get_future();
+            }
+            ::sockaddr* posix_sockaddr() {
+                return &_sa.as_posix_sockaddr();
+            }
+            socklen_t* socklen_ptr() {
+                return &_sa.addr_length;
+            }
+        };
+        auto desc = std::make_unique<accept_completion>(listenfd);
+        auto req = internal::io_request::make_accept(listenfd.fd.get(), desc->posix_sockaddr(), desc->socklen_ptr(), SOCK_NONBLOCK | SOCK_CLOEXEC);
+        return submit_request(std::move(desc), req);
     }
 
     virtual future<> connect(pollable_fd_state& fd, socket_address& sa) override {
