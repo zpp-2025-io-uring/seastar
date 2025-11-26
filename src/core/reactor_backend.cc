@@ -2321,32 +2321,13 @@ public:
 #endif
 
     virtual future<temporary_buffer<char>> recv_some(pollable_fd_state& fd, internal::buffer_allocator* ba) override {
-        if (fd.take_speculation(POLLIN)) {
-            auto buffer = ba->allocate_buffer();
-            try {
-                auto r = fd.fd.recv(buffer.get_write(), buffer.size(), MSG_DONTWAIT);
-                if (r) {
-                    if (size_t(*r) == buffer.size()) {
-                        fd.speculate_epoll(EPOLLIN);
-                    }
-                    buffer.trim(*r);
-                    return make_ready_future<temporary_buffer<char>>(std::move(buffer));
-                }
-            } catch (...) {
-                return current_exception_as_future<temporary_buffer<char>>();
-            }
-        }
         class recv_completion final : public io_completion {
-            pollable_fd_state& _fd;
             temporary_buffer<char> _buffer;
             promise<temporary_buffer<char>> _result;
         public:
             recv_completion(pollable_fd_state& fd, temporary_buffer<char> buffer)
-                : _fd(fd), _buffer(std::move(buffer)) {}
+                : _buffer(std::move(buffer)) {}
             void complete(size_t bytes) noexcept final {
-                if (bytes == _buffer.size()) {
-                    _fd.speculate_epoll(EPOLLIN);
-                }
                 _buffer.trim(bytes);
                 _result.set_value(std::move(_buffer));
                 delete this;
