@@ -2227,7 +2227,25 @@ public:
     }
 
     virtual future<size_t> send(pollable_fd_state& fd, const void* buffer, size_t len) override {
-        return make_ready_future<size_t>();
+        class write_completion final : public io_completion {
+            promise<size_t> _result;
+        public:
+            write_completion(pollable_fd_state& fd, size_t to_write) {}
+            void complete(size_t bytes) noexcept final {
+                _result.set_value(bytes);
+                delete this;
+            }
+            void set_exception(std::exception_ptr eptr) noexcept final {
+                _result.set_exception(eptr);
+                delete this;
+            }
+            future<size_t> get_future() {
+                return _result.get_future();
+            }
+        };
+        auto desc = std::make_unique<write_completion>(fd, len);
+        auto req = internal::io_request::make_send(fd.fd.get(), buffer, len, MSG_NOSIGNAL);
+        return submit_request(std::move(desc), req);    
     }
 
     virtual future<temporary_buffer<char>> recv_some(pollable_fd_state& fd, internal::buffer_allocator* ba) override {
