@@ -2350,6 +2350,13 @@ bool reactor_backend_selector::has_enough_aio_nr() {
 }
 
 std::unique_ptr<reactor_backend> reactor_backend_selector::create(reactor& r) {
+    if (_name == "asymmetric_io_uring") {
+#ifdef SEASTAR_HAVE_URING
+        return std::make_unique<reactor_backend_asymmetric_uring>(r);
+#else
+        throw std::runtime_error("asymmetric_io_uring backend not compiled in");
+#endif
+    }
     if (_name == "io_uring") {
 #ifdef SEASTAR_HAVE_URING
         return std::make_unique<reactor_backend_uring>(r);
