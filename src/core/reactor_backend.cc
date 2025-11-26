@@ -2198,7 +2198,32 @@ public:
     }
 
     virtual future<size_t> sendmsg(pollable_fd_state& fd, std::span<iovec> iovs, size_t len) final {
-        return make_ready_future<size_t>();
+        class write_completion final : public io_completion {
+            ::msghdr _mh = {};
+            promise<size_t> _result;
+        public:
+            write_completion(std::span<iovec> iovs) {
+                _mh.msg_iov = iovs.data();
+                _mh.msg_iovlen = std::min<size_t>(iovs.size(), IOV_MAX);
+            }
+            void complete(size_t bytes) noexcept final {
+                _result.set_value(bytes);
+                delete this;
+            }
+            void set_exception(std::exception_ptr eptr) noexcept final {
+                _result.set_exception(eptr);
+                delete this;
+            }
+            ::msghdr* msghdr() {
+                return &_mh;
+            }
+            future<size_t> get_future() {
+                return _result.get_future();
+            }
+        };
+        auto desc = std::make_unique<write_completion>(iovs);
+        auto req = internal::io_request::make_sendmsg(fd.fd.get(), desc->msghdr(), MSG_NOSIGNAL);
+        return submit_request(std::move(desc), req);
     }
 
     virtual future<size_t> send(pollable_fd_state& fd, const void* buffer, size_t len) override {
