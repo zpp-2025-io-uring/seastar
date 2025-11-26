@@ -2380,6 +2380,7 @@ std::vector<reactor_backend_selector> reactor_backend_selector::available() {
     std::vector<reactor_backend_selector> ret;
 #ifdef SEASTAR_HAVE_URING
     if (detect_io_uring()) {
+        ret.push_back(reactor_backend_selector("asymmetric_io_uring"));
         ret.push_back(reactor_backend_selector("io_uring"));
     }
 #endif
