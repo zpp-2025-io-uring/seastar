@@ -2166,7 +2166,35 @@ public:
     }
 
     virtual future<temporary_buffer<char>> read_some(pollable_fd_state& fd, internal::buffer_allocator* ba) override {
-        return make_ready_future<temporary_buffer<char>>();
+        class read_completion final : public io_completion {
+            temporary_buffer<char> _buffer;
+            promise<temporary_buffer<char>> _result;
+        public:
+            read_completion(pollable_fd_state& fd, temporary_buffer<char> buffer)
+                : _buffer(std::move(buffer)) {}
+            void complete(size_t bytes) noexcept final {
+                _buffer.trim(bytes);
+                _result.set_value(std::move(_buffer));
+                delete this;
+            }
+            void set_exception(std::exception_ptr eptr) noexcept final {
+                _result.set_exception(eptr);
+                delete this;
+            }
+            future<temporary_buffer<char>> get_future() {
+                return _result.get_future();
+            }
+            char* get_write() {
+                return _buffer.get_write();
+            }
+            size_t get_size() {
+                return _buffer.size();
+            }
+        };
+        auto desc = std::make_unique<read_completion>(fd, ba->allocate_buffer());
+        const uint64_t position_file_offset = -1;
+        auto req = internal::io_request::make_read(fd.fd.get(), position_file_offset, desc->get_write(), desc->get_size(), false);
+        return submit_request(std::move(desc), req);    
     }
 
     virtual future<size_t> sendmsg(pollable_fd_state& fd, std::span<iovec> iovs, size_t len) final {
