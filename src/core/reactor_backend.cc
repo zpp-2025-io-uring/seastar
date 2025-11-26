@@ -2298,30 +2298,11 @@ public:
     }
 #if SEASTAR_API_LEVEL < 9
     virtual future<size_t> send(pollable_fd_state& fd, const void* buffer, size_t len) override {
-        if (fd.take_speculation(EPOLLOUT)) {
-            try {
-                auto r = fd.fd.send(buffer, len, MSG_NOSIGNAL | MSG_DONTWAIT);
-                if (r) {
-                    if (size_t(*r) == len) {
-                        fd.speculate_epoll(EPOLLOUT);
-                    }
-                    return make_ready_future<size_t>(*r);
-                }
-            } catch (...) {
-                return current_exception_as_future<size_t>();
-            }
-        }
         class write_completion final : public io_completion {
-            pollable_fd_state& _fd;
-            const size_t _to_write;
             promise<size_t> _result;
         public:
-            write_completion(pollable_fd_state& fd, size_t to_write)
-                : _fd(fd), _to_write(to_write) {}
+            write_completion(pollable_fd_state& fd, size_t to_write) {}
             void complete(size_t bytes) noexcept final {
-                if (bytes == _to_write) {
-                    _fd.speculate_epoll(EPOLLOUT);
-                }
                 _result.set_value(bytes);
                 delete this;
             }
