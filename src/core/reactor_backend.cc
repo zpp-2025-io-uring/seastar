@@ -2157,14 +2157,12 @@ public:
     }
     virtual future<> connect(pollable_fd_state& fd, socket_address& sa) override {
         class connect_completion final : public io_completion {
-            pollable_fd_state& _fd;
             socket_address _sa;
             promise<> _result;
         public:
-            connect_completion(pollable_fd_state& fd, const socket_address& sa)
-                : _fd(fd), _sa(sa) {}
-            void complete(size_t fd) noexcept final {
-                _fd.speculate_epoll(POLLOUT);
+            connect_completion(const socket_address& sa)
+                : _sa(sa) {}
+            void complete(size_t) noexcept final {
                 _result.set_value();
                 delete this;
             }
@@ -2182,7 +2180,7 @@ public:
                 return _sa.addr_length;
             }
         };
-        auto desc = std::make_unique<connect_completion>(fd, sa);
+        auto desc = std::make_unique<connect_completion>(sa);
         auto req = internal::io_request::make_connect(fd.fd.get(), desc->posix_sockaddr(), desc->socklen());
         return submit_request(std::move(desc), std::move(req));
     }
