@@ -2135,7 +2135,34 @@ public:
     }
 
     virtual future<size_t> recvmsg(pollable_fd_state& fd, const std::vector<iovec>& iov) override {
-        return make_ready_future<size_t>();
+        class read_completion final : public io_completion {
+            std::vector<iovec> _iov;
+            ::msghdr _mh = {};
+            promise<size_t> _result;
+        public:
+            read_completion(pollable_fd_state& fd, const std::vector<iovec>& iov)
+                : _iov(iov) {
+                _mh.msg_iov = const_cast<iovec*>(_iov.data());
+                _mh.msg_iovlen = _iov.size();
+            }
+            void complete(size_t bytes) noexcept final {
+                _result.set_value(bytes);
+                delete this;
+            }
+            void set_exception(std::exception_ptr eptr) noexcept final {
+                _result.set_exception(eptr);
+                delete this;
+            }
+            ::msghdr* msghdr() {
+                return &_mh;
+            }
+            future<size_t> get_future() {
+                return _result.get_future();
+            }
+        };
+        auto desc = std::make_unique<read_completion>(fd, iov);
+        auto req = internal::io_request::make_recvmsg(fd.fd.get(), desc->msghdr(), 0);
+        return submit_request(std::move(desc), req);    
     }
 
     virtual future<temporary_buffer<char>> read_some(pollable_fd_state& fd, internal::buffer_allocator* ba) override {
