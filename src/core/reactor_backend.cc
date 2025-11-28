@@ -1996,6 +1996,8 @@ public:
             , _preempt_io_context(_r, _r._task_quota_timer, _hrtimer_timerfd)
             , _hrtimer_completion(_r, _hrtimer_timerfd)
             , _smp_wakeup_completion(_r._notify_eventfd) {
+        const auto& worker_cpus = r._cfg.async_worker_cpus;
+        SEASTAR_ASSERT(!worker_cpus.empty());
     }
 
     ~reactor_backend_asymmetric_uring() {
@@ -2391,4 +2393,83 @@ std::vector<reactor_backend_selector> reactor_backend_selector::available() {
     return ret;
 }
 
+unsigned reactor_backend_selector::num_async_workers(const resource::cpuset& cpu_set) const {
+#ifdef SEASTAR_HAVE_URING
+    if (_name == "asymmetric_io_uring") {
+        return asymmetric_uring_factory::calculate_num_workers(cpu_set, asymmetric_uring_factory::CPUS_PER_IO_URING_WORKER);
+    }
+#endif
+    return 0;
 }
+
+resource::cpuset reactor_backend_selector::allocate_async_workers(resource::cpuset& cpu_set) const {
+#ifdef SEASTAR_HAVE_URING
+    if (_name == "asymmetric_io_uring") {
+        auto cfg = asymmetric_uring_factory::allocate_cpus(cpu_set, asymmetric_uring_factory::CPUS_PER_IO_URING_WORKER);
+        return cfg.worker_cpus;
+    }
+#endif
+    return {};  // Other backends don't need workers
+}
+
+#ifdef SEASTAR_HAVE_URING
+// ============================================================================
+// Asymmetric IO_Uring Factory Implementation
+// ============================================================================
+
+unsigned asymmetric_uring_factory::calculate_num_workers(const resource::cpuset& cpu_set, unsigned cores_per_worker) {
+    if (cpu_set.empty() || cores_per_worker == 0) {
+        return 0;
+    }
+    // Need at least cores_per_worker + 1 to have workers (at least 1 app core)
+    if (cpu_set.size() <= cores_per_worker) {
+        return 0;
+    }
+    return cpu_set.size() / cores_per_worker;
+}
+
+asymmetric_uring_factory::config asymmetric_uring_factory::allocate_cpus(
+    resource::cpuset& cpu_set, unsigned cores_per_worker) {
+    
+    config cfg;
+    cfg.cores_per_worker = cores_per_worker;
+    
+    unsigned num_workers = calculate_num_workers(cpu_set, cores_per_worker);
+    
+    if (num_workers == 0) {
+        seastar_logger.warn("Asymmetric io_uring: not enough CPUs for workers "
+                           "(need at least {} CPUs for 1 worker), using 0 workers",
+                           cores_per_worker + 1);
+        cfg.app_cpus = cpu_set;
+        return cfg;
+    }
+    
+    if (cpu_set.size() <= num_workers) {
+        throw std::runtime_error(
+            fmt::format("Asymmetric io_uring requires at least {} app core(s) + {} worker core(s), "
+                       "but only {} CPU(s) available",
+                       1, num_workers, cpu_set.size()));
+    }
+    
+    // Allocate last N cores for workers
+    std::copy(cpu_set.rbegin(),
+              std::next(cpu_set.rbegin(), num_workers),
+              std::inserter(cfg.worker_cpus, cfg.worker_cpus.end()));
+    
+    // Remove workers from cpu_set and store app cores
+    for (auto cpu : cfg.worker_cpus) {
+        cpu_set.erase(cpu);
+    }
+    cfg.app_cpus = cpu_set;
+    
+    seastar_logger.info("Asymmetric io_uring: {} app cores [{}], {} worker cores [{}]",
+                       cfg.app_cpus.size(), fmt::join(cfg.app_cpus, ","),
+                       cfg.worker_cpus.size(), fmt::join(cfg.worker_cpus, ","));
+    
+    return cfg;
+}
+
+#endif // SEASTAR_HAVE_URING
+
+}
+

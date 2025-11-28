@@ -402,6 +402,9 @@ private:
      */
     bool poll_once();
     bool pure_poll_once();
+
+    /// Obtains the reactor configuration
+    const reactor_config& config() const;
 public:
     /// Register a user-defined signal handler
     [[deprecated("Use seastar::handle_signal(signo, handler, once); instead")]]

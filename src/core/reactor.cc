@@ -3451,6 +3451,8 @@ reactor::pure_poll_once() {
     return false;
 }
 
+const reactor_config& reactor::config() const { return _cfg; }
+
 namespace internal {
 
 class poller::registration_task final : public task {
@@ -4320,6 +4322,16 @@ void smp::configure(const smp_options& smp_opts, const reactor_options& reactor_
         cpu_set = opts_cpuset;
     }
 
+    // Let the backend selector allocate async worker cores if needed
+    auto backend_selector = reactor_opts.reactor_backend.get_selected_candidate();
+    resource::cpuset async_worker_cpus;
+    try {
+        async_worker_cpus = backend_selector.allocate_async_workers(cpu_set);
+    } catch (const std::exception& e) {
+        seastar_logger.error("{}", e.what());
+        exit(1);
+    }
+
     if (smp_opts.smp) {
         smp::count = smp_opts.smp.get_value();
     } else {
@@ -4457,6 +4469,7 @@ void smp::configure(const smp_options& smp_opts, const reactor_options& reactor_
         .no_poll_aio = !reactor_opts.poll_aio.get_value() || (reactor_opts.poll_aio.defaulted() && reactor_opts.overprovisioned),
         .aio_nowait_works = reactor_opts.linux_aio_nowait.get_value(), // Mixed in with filesystem-provided values later
         .abort_on_too_long_task_queue = reactor_opts.abort_on_too_long_task_queue.get_value(),
+        .async_worker_cpus = async_worker_cpus,
     };
 
     // Disable hot polling if sched wakeup granularity is too high
@@ -4556,7 +4569,6 @@ void smp::configure(const smp_options& smp_opts, const reactor_options& reactor_
 
     _all_event_loops_done.emplace(smp::count);
 
-    auto backend_selector = reactor_opts.reactor_backend.get_selected_candidate();
     seastar_logger.info("Reactor backend: {}", backend_selector);
 
     _qs_owner = decltype(smp::_qs_owner){new smp_message_queue* [smp::count], qs_deleter{}};

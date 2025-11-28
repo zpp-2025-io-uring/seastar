@@ -25,6 +25,7 @@
 #include <seastar/util/memory_diagnostics.hh>
 #include <seastar/util/modules.hh>
 #include <seastar/core/scheduling.hh>
+#include <set>
 
 namespace seastar {
 
@@ -44,6 +45,8 @@ struct reactor_config {
     bool no_poll_aio = false;
     bool aio_nowait_works = false;
     bool abort_on_too_long_task_queue = false;
+    /// CPUs dedicated to async workers (for asymmetric backend)
+    std::set<unsigned> async_worker_cpus;
 };
 /// \endcond
 
