@@ -24,6 +24,7 @@
 #include <seastar/util/program-options.hh>
 #include <seastar/util/memory_diagnostics.hh>
 #include <seastar/core/scheduling.hh>
+#include <set>
 
 namespace seastar {
 
@@ -43,6 +44,8 @@ struct reactor_config {
     bool no_poll_aio = false;
     bool aio_nowait_works = false;
     bool abort_on_too_long_task_queue = false;
+    /// CPUs dedicated to async workers (for asymmetric backend)
+    std::set<unsigned> async_worker_cpus;
 };
 /// \endcond
 
@@ -157,6 +160,7 @@ struct reactor_options : public program_options::option_group {
     /// * \p linux-aio
     /// * \p epoll
     /// * \p io_uring
+    /// * \p asymmetric_io_uring
     ///
     /// Default: \p linux-aio (if available).
     program_options::selection_value<reactor_backend_selector> reactor_backend;

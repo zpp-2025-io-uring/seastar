@@ -377,6 +377,9 @@ class job_rpc : public job {
     std::chrono::steady_clock::time_point _stop;
     uint64_t _total_messages = 0;
     accumulator_type _latencies;
+    uint64_t _payload_size_bytes = 0;
+    std::chrono::steady_clock::time_point _start_time{};
+    std::chrono::duration<double> _total_duration{0.0};
 
     future<> call_echo(unsigned dummy) {
         auto cln = _rpc.make_client<uint64_t(uint64_t)>(rpc_verb::ECHO);
@@ -405,9 +408,11 @@ public:
     {
         if (_cfg.verb == "echo") {
             _call = [this] (unsigned x) { return call_echo(x); };
+            _payload_size_bytes = 0;
         } else if (_cfg.verb == "write") {
             payload_t payload;
             payload.resize(_cfg.payload / sizeof(payload_t::value_type), 0);
+            _payload_size_bytes = _cfg.payload;
             _call = [this, payload = std::move(payload)] (unsigned x) { return call_write(x, payload); };
         } else if (_cfg.verb == "vecho") {
             _call = [this] (unsigned x) {
@@ -418,6 +423,7 @@ public:
                         fmt::print("{}.{} got error {}\n", this_shard_id(), x, ex);
                 });
             };
+            _payload_size_bytes = 0;
         } else {
             throw std::runtime_error("unknown verb");
         }
@@ -431,6 +437,7 @@ public:
         co.tcp_nodelay = _ccfg.nodelay;
         co.isolation_cookie = _cfg.sg_name;
         _client = std::make_unique<rpc_protocol::client>(_rpc, co, _caddr);
+        _start_time = std::chrono::steady_clock::now();
         return parallel_for_each(std::views::iota(0u, _cfg.parallelism), [this] (auto dummy) {
           auto f = make_ready_future<>();
           if (_cfg.sleep_time) {
@@ -456,6 +463,7 @@ public:
             });
           });
         }).finally([this] {
+            _total_duration = std::chrono::steady_clock::now() - _start_time;
             return _client->stop();
         });
       });
@@ -463,6 +471,12 @@ public:
 
     virtual void emit_result(YAML::Emitter& out) const override {
         out << YAML::Key << "messages" << YAML::Value << _total_messages;
+
+        auto total_bytes = _total_messages * _payload_size_bytes;
+        double throughput_kBps = (total_bytes >> 10) / _total_duration.count();
+        double messages_per_sec = _total_messages / _total_duration.count();
+        out << YAML::Key << "throughput" << YAML::Value << throughput_kBps << YAML::Comment("kB/s");
+        out << YAML::Key << "messages per second" << YAML::Value << messages_per_sec;
         out << YAML::Key << "latencies" << YAML::Comment("usec");
         out << YAML::BeginMap;
         out << YAML::Key << "average" << YAML::Value << (uint64_t)mean(_latencies);
