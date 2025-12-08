@@ -353,6 +353,18 @@ public:
     }
 };
 
+#ifdef SEASTAR_HAVE_URING
+
+/// Helper functions that manage the lifecycle and configuration of asymmetric io_uring backend
+/// Handles CPU allocation, worker thread management, and backend creation
+namespace uring {
+
+inline constexpr unsigned QUEUE_LEN = 200;
+
+} // namespace uring
+
+#endif // SEASTAR_HAVE_URING
+
 }
 
 
