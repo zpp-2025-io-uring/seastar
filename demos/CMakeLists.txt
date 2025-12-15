@@ -80,6 +80,10 @@ seastar_add_demo (l3
 seastar_add_demo (rpc
   SOURCES rpc_demo.cc)
 
+
+seastar_add_demo (rpc_streaming
+  SOURCES rpc_streaming_demo.cc)
+
 seastar_add_demo (scheduling_group
   SOURCES scheduling_group_demo.cc)
 
