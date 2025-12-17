@@ -1195,6 +1195,54 @@ void reactor_backend_epoll::reset_preemption_monitor() {
     _r._preemption_monitor.head.store(0, std::memory_order_relaxed);
 }
 
+unsigned calculate_num_workers(const resource::cpuset& cpu_set, unsigned cores_per_worker) {
+    if (cores_per_worker == 0 || cpu_set.empty()) {
+        return 0;
+    }
+    auto res = (cpu_set.size() + cores_per_worker) / (cores_per_worker + 1);
+    if(res == 0){
+        // We don't wanna have 0 workers.
+        return 1;
+    }
+    return res;
+}
+
+static inline async_worker_allocation temp_allocate_async_workers(const resource::cpuset& async_workers_cpu_set, const resource::cpuset& cpu_set, bool is_asymmetric) {
+    seastar_logger.debug("Calculating async workers allocation for is_asymmetric: {}, async_workers_cpu_set: {}, cpu_set: {}", is_asymmetric, async_workers_cpu_set, cpu_set);
+    resource::cpuset new_async_workers_cpu_set;
+    resource::cpuset new_cpuset;
+    if (async_workers_cpu_set.empty()) {
+        seastar_logger.warn("Async workers cpuset was empty, but for benchmarking purpose, we'll allow it.");
+        constexpr unsigned CORES_PER_WORKER = 7;
+        unsigned num_workers = calculate_num_workers(cpu_set, CORES_PER_WORKER);
+        SEASTAR_ASSERT(num_workers !=0);
+        if (cpu_set.size() <= num_workers) {
+            throw std::runtime_error(
+                fmt::format("Asymmetric io_uring requires at least {} app core(s) + {} worker core(s), "
+                        "but only {} CPU(s) available",
+                        1, num_workers, cpu_set.size()));
+        }
+        // Allocate N cores after
+        std::copy(cpu_set.crbegin(),
+                std::next(cpu_set.crbegin(), num_workers),
+                std::inserter(new_async_workers_cpu_set, new_async_workers_cpu_set.end()));
+        
+        // Remove calculated cores from the app's cpuset.
+        new_cpuset = cpu_set;
+        for (auto cpu : new_async_workers_cpu_set) {
+            new_cpuset.erase(cpu);
+        }
+    }
+    else{
+        new_async_workers_cpu_set = async_workers_cpu_set;
+        new_cpuset = cpu_set;
+    }
+    if (is_asymmetric) {
+        return {new_async_workers_cpu_set, new_cpuset};
+    }
+    return {{}, new_cpuset};  // Other backends don't need workers
+}
+
 #ifdef SEASTAR_HAVE_URING
 
 static
@@ -1293,6 +1341,30 @@ detect_io_uring() {
         ::io_uring_queue_exit(&ring_opt.value());
     }
     return bool(ring_opt);
+}
+
+static
+bool
+detect_asymmetric_io_uring() {
+    if (!kernel_uname().whitelisted({"5.17"}) && have_md_devices()) {
+        // Older kernels fall back to workqueues for RAID devices
+        return false;
+    }
+    if (!kernel_uname().whitelisted({"5.12"}) && mlock_limit() < (8 << 20)) {
+        // Older kernels lock about 32k/vcpu for the ring itself. Require 8MB of
+        // locked memory to be safe (8MB is what newer kernels and newer systemd provide)
+        return false;
+    }
+    auto base_ring_opt = uring::try_create_base_asymmetric_uring(sched_getcpu(), false);
+    if (!base_ring_opt) {
+        return false;
+    }
+    auto attached_ring_opt = uring::try_create_attached_asymmetric_uring(base_ring_opt.value().ring_fd, false);
+    if (attached_ring_opt) {
+        ::io_uring_queue_exit(&attached_ring_opt.value());
+    }
+    ::io_uring_queue_exit(&base_ring_opt.value());
+    return bool(attached_ring_opt);
 }
 
 static
@@ -2183,29 +2255,28 @@ class asymmetric_uring_reactor_backend_configurator : public reactor_backend_con
             _cpu_set.erase(cpu_id);
         }
     }
-
     /// Assigns set of cpus for backends that need dedicated async workers.
     /// Throws if async_workers_cpu_set is empty
     void allocate_async_workers(const reactor_options& reactor_opts, const smp_options& smp_opts) {
-        if (_async_workers_cpuset.empty()) {
-            throw std::runtime_error("No CPUs specified for asymmetric_io_uring workers. Please see --async-workers-cpuset option.");
-        }
-
-        maybe_remove_overlapping_cpus(reactor_opts, smp_opts);
+        auto async_workers_cpu_set = reactor_opts.async_workers_cpuset ? reactor_opts.async_workers_cpuset.get_value() : resource::cpuset{};
+        auto pair = temp_allocate_async_workers(async_workers_cpu_set, _cpu_set, false);
+        _async_workers_cpuset = std::move(pair.async_workers_cpuset);
+        _cpu_set = std::move(pair.reactor_cpuset);
     }
 
 public:
     asymmetric_uring_reactor_backend_configurator(resource::cpuset cpu_set, const reactor_options& reactor_opts, const smp_options& smp_opts)
         : _cpu_set(std::move(cpu_set))
         , _async_workers_cpuset(reactor_opts.async_workers_cpuset.get_value())
-        , _master_uring_fds(_async_workers_cpuset.size(), -1)
-        , _init_data(smp_opts.smp ? smp_opts.smp.get_value() : _cpu_set.size(), uring_groups_init_result{})
     {
         allocate_async_workers(reactor_opts, smp_opts);
 
         seastar_logger.debug("Backend async workers allocated: {} potential app cores [{}], {} worker cores [{}]",
                 _cpu_set.size(), fmt::join(_cpu_set, ","),
                 _async_workers_cpuset.size(), fmt::join(_async_workers_cpuset, ","));
+
+        _master_uring_fds.resize(_async_workers_cpuset.size(), -1);
+        _init_data.resize(_cpu_set.size() + _async_workers_cpuset.size(), uring_groups_init_result{});
     }
 
     virtual const resource::cpuset& configured_cpuset() const override {
@@ -2365,8 +2436,12 @@ static bool detect_aio_poll() {
 class noop_reactor_backend_configurator : public reactor_backend_configurator {
     resource::cpuset _cpu_set;
 public:
-    noop_reactor_backend_configurator(resource::cpuset cpu_set)
-        : _cpu_set(cpu_set) {}
+    noop_reactor_backend_configurator(resource::cpuset cpu_set, const reactor_options& reactor_opts, const smp_options& smp_opts)
+        {
+            auto async_workers_cpu_set = reactor_opts.async_workers_cpuset ? reactor_opts.async_workers_cpuset.get_value() : resource::cpuset{};
+            auto pair = temp_allocate_async_workers(async_workers_cpu_set, std::move(cpu_set), false);
+            _cpu_set = std::move(pair.reactor_cpuset);
+        }
 
     virtual const resource::cpuset& configured_cpuset() const override {
         return _cpu_set;
@@ -2437,6 +2512,8 @@ std::vector<reactor_backend_selector> reactor_backend_selector::available() {
 #ifdef SEASTAR_HAVE_URING
     if (detect_io_uring()) {
         ret.push_back(reactor_backend_selector("io_uring"));
+    }
+    if (detect_asymmetric_io_uring()) {
         ret.push_back(reactor_backend_selector("asymmetric_io_uring"));
     }
 #endif
@@ -2453,6 +2530,6 @@ std::shared_ptr<reactor_backend_configurator> reactor_backend_selector::configur
         return std::make_shared<uring::asymmetric_uring_reactor_backend_configurator>(cpu_set, reactor_opts, smp_opts);
     }
 #endif
-    return std::make_shared<noop_reactor_backend_configurator>(cpu_set);
+    return std::make_shared<noop_reactor_backend_configurator>(cpu_set, reactor_opts, smp_opts);
 }
 }
