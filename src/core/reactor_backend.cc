@@ -48,6 +48,7 @@
 #include <seastar/core/reactor.hh>
 #include <seastar/core/reactor_config.hh>
 #include <seastar/core/smp.hh>
+#include <seastar/core/shard_id.hh>
 #include <seastar/util/defer.hh>
 #include <seastar/util/read_first_line.hh>
 
@@ -2053,6 +2054,21 @@ try_create_asymmetric_uring(const std::variant<std::monostate, int, compile_safe
     } else {
         return std::nullopt;
     }
+}
+
+unsigned
+select_worker_cpu(seastar::shard_id shard_id, const resource::cpuset& worker_cpus) {
+    SEASTAR_ASSERT(!worker_cpus.empty());
+    const size_t selected_cpu_rank = get_uring_group_id(shard_id, worker_cpus);
+    return *std::next(worker_cpus.cbegin(), selected_cpu_rank);
+}
+
+bool is_master_shard(seastar::shard_id shard_id, const resource::cpuset& worker_cpus) noexcept {
+    return shard_id < worker_cpus.size();
+}
+
+unsigned get_uring_group_id(seastar::shard_id shard_id, const resource::cpuset& worker_cpus) noexcept {
+    return shard_id % worker_cpus.size();
 }
 
 } // namespace uring
