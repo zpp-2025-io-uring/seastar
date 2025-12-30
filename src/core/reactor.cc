@@ -3911,6 +3911,10 @@ reactor_options::reactor_options(program_options::option_group* parent_group)
                  " Note that if the seastar_memory logger is set to debug or trace level, the diagnostics will be logged irrespective of this setting.")
     , reactor_backend(*this, "reactor-backend", backend_selector_candidates(), reactor_backend_selector::default_backend().name(),
                 fmt::format("Internal reactor implementation ({})", reactor_backend_selector::available()))
+    , async_workers_cpuset(*this, "async-workers-cpuset", resource::cpuset{},
+                "CPUs to use (in cpuset(7) format) for backend's async workers."
+                " Only applicable to, and required by, the asymmetric_io_uring reactor backend (see --reactor-backend)."
+                " Note that if the --cpuset is not set, using --async-workers-cpuset will restrict the CPUs for the SMP.")
     , aio_fsync(*this, "aio-fsync", kernel_supports_aio_fsync(),
                 "Use Linux aio for fsync() calls. This reduces latency; requires Linux 4.18 or later.")
     , max_networking_io_control_blocks(*this, "max-networking-io-control-blocks", 10000,
@@ -4233,6 +4237,21 @@ unsigned smp::adjust_max_networking_aio_io_control_blocks(unsigned network_iocbs
     return network_iocbs;
 }
 
+static inline void warn_if_shards_and_async_workers_share_cpu(const std::vector<resource::cpu>& allocations, const resource::cpuset& async_worker_cpus) {
+    std::set<unsigned> overlapping_cpus;
+    for (auto cpu : allocations) {
+        if (async_worker_cpus.contains(cpu.cpu_id)) {
+            overlapping_cpus.insert(cpu.cpu_id);
+        }
+    }
+
+    if (!overlapping_cpus.empty()) {
+        seastar_logger.warn("The following CPUs assigned to shards overlap with the async workers cpuset: {}."
+                             " This may lead to performance degradation. It is recommended to keep the main"
+                             " cpuset and async workers cpuset disjoint.", fmt::join(overlapping_cpus, ","));
+    }
+}
+
 void smp::configure(const smp_options& smp_opts, const reactor_options& reactor_opts)
 {
     bool use_transparent_hugepages = !reactor_opts.overprovisioned;
@@ -4401,6 +4420,8 @@ void smp::configure(const smp_options& smp_opts, const reactor_options& reactor_
         // Previously, we got away wth this by accident due to #2137.
         memory::configure_minimal();
     }
+
+    warn_if_shards_and_async_workers_share_cpu(allocations, async_worker_cpus);
 
     _shard_to_numa_node_mapping.resize(smp::count);
     for (unsigned i = 0; i < smp::count; i++) {
