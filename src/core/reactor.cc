@@ -4297,6 +4297,35 @@ static inline void warn_if_shards_and_async_workers_share_cpu(const std::vector<
     }
 }
 
+/// @brief If async worker CPUs are allocated and neither --smp nor --cpuset is specified, remove async worker CPUs from the main cpuset to avoid overcommitment by default.
+/// @param cpu_set The main cpuset to potentially remove async worker CPUs from.
+/// @param reactor_opts The reactor options, used to check if overprovisioned mode is enabled.
+/// @param smp_opts The SMP options, used to check if --smp or --cpuset is specified.
+/// @param async_worker_cpus The set of CPUs allocated for async workers, used to remove them from the main cpuset if needed.
+/// @throws std::invalid_argument if running in overprovisioned mode with async workers allocated and neither --smp nor --cpuset is specified, since this combination might be unintentional.
+static inline void maybe_remove_overlapping_cpus(resource::cpuset& cpu_set, const reactor_options& reactor_opts, const smp_options& smp_opts, const resource::cpuset& async_worker_cpus) {
+    if (async_worker_cpus.size() == 0) {
+        return;
+    }
+
+    if (smp_opts.smp || smp_opts.cpuset){
+        // User did it explicitly, we won't mess with their choices.
+        return;
+    }
+
+    if (reactor_opts.overprovisioned) {
+        // If running in overprovisioned mode, we shouldn't remove async worker CPUs from the main cpuset, since overprovisioned mode is meant to allow running with more threads than CPUs.
+        // However, this might unintentionally lead to having async workers and multiple shards running on the same CPU. We decide not to allow this.
+        // If user would like to run in overprovisioned mode with async workers, they should explicitly specify the cpuset or smp count.
+        throw std::invalid_argument("Cannot run in overprovisioned mode when async workers are allocated and neither --smp nor --cpuset is specified");
+    }
+
+    seastar_logger.info("Removing async worker CPUs from main cpuset by default (neither --smp nor --cpuset specified)");
+    for (auto cpu_id : async_worker_cpus) {
+        cpu_set.erase(cpu_id);
+    }
+}
+
 void smp::configure(const smp_options& smp_opts, const reactor_options& reactor_opts)
 {
     bool use_transparent_hugepages = !reactor_opts.overprovisioned;
@@ -4379,6 +4408,7 @@ void smp::configure(const smp_options& smp_opts, const reactor_options& reactor_
         auto allocation = backend_selector.allocate_async_workers(reactor_opts.async_workers_cpuset.get_value(), cpu_set);
         async_worker_cpus = allocation.async_workers_cpuset;
         cpu_set = allocation.reactor_cpuset;
+        maybe_remove_overlapping_cpus(cpu_set, reactor_opts, smp_opts, async_worker_cpus);
 
         seastar_logger.debug("Backend async workers allocated: {} potential app cores [{}], {} worker cores [{}]",
                 cpu_set.size(), fmt::join(cpu_set, ","),
