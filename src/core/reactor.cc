@@ -4351,7 +4351,7 @@ void smp::configure(const smp_options& smp_opts, const reactor_options& reactor_
     auto backend_selector = reactor_opts.reactor_backend.get_selected_candidate();
     resource::cpuset async_worker_cpus;
     try {
-        auto allocation = backend_selector.allocate_async_workers(reactor_opts.async_workers_cpuset.get_value(), cpu_set);
+        auto allocation = backend_selector.allocate_async_workers(reactor_opts.async_workers_cpuset.get_value(), cpu_set, reactor_opts, smp_opts);
         async_worker_cpus = allocation.async_workers_cpuset;
         cpu_set = allocation.reactor_cpuset;
 
