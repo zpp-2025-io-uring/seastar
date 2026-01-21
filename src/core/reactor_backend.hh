@@ -31,6 +31,8 @@
 #include <seastar/util/bool_class.hh>
 #include <seastar/core/shard_id.hh>
 #include <seastar/core/resource.hh>
+#include <seastar/core/reactor_config.hh>
+#include <seastar/core/smp_options.hh>
 
 #include <fmt/ostream.h>
 #include <sys/time.h>
@@ -386,7 +388,7 @@ public:
     /// Returns async_worker_allocation with allocated CPUs and remaining cpu_set for backends that need dedicated async workers
     /// For backends that don't need dedicated async workers the allocation has empty async_workers_cpuset and full cpu_set
     /// Throws if async_workers_cpu_set is empty
-    async_worker_allocation allocate_async_workers(const resource::cpuset& async_workers_cpu_set, const resource::cpuset& cpu_set) const;
+    async_worker_allocation allocate_async_workers(const resource::cpuset& async_workers_cpu_set, resource::cpuset& cpu_set, const reactor_options& reactor_opts, const smp_options& smp_opts) const;
 
     friend std::ostream& operator<<(std::ostream& os, const reactor_backend_selector& rbs) {
         return os << rbs._name;
