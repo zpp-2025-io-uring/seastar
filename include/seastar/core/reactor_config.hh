@@ -22,12 +22,19 @@
 #pragma once
 
 #include <any>
+#include <cstddef>
+#include <string>
 #include <seastar/util/program-options.hh>
 #include <seastar/util/memory_diagnostics.hh>
 #include <seastar/core/scheduling.hh>
 #include <seastar/core/resource.hh>
 
 namespace seastar {
+
+struct uring_buffer_ring_config {
+    unsigned entries;
+    size_t size;
+};
 
 /// \cond internal
 struct reactor_config {
@@ -46,6 +53,7 @@ struct reactor_config {
     bool aio_nowait_works = false;
     bool abort_on_too_long_task_queue = false;
     std::variant<std::monostate, int, std::any> asymmetric_uring;
+    std::optional<uring_buffer_ring_config> buffer_ring_config;
 };
 /// \endcond
 
@@ -168,6 +176,10 @@ struct reactor_options : public program_options::option_group {
     ///
     /// \note This option is only valid when the \p reactor_backend is set to \p asymmetric_io_uring.
     program_options::value<resource::cpuset> async_workers_cpuset;
+    /// \brief number of buffers in asymmectric io_uring backend buffer ring.
+    program_options::value<unsigned> uring_buffer_ring_entries;
+    /// \brief size of buffers in asymmectric io_uring backend buffer ring.
+    program_options::value<std::string> uring_buffer_ring_size;
     /// \brief Use Linux aio for fsync() calls.
     ///
     /// This reduces latency. Requires Linux 4.18 or later.

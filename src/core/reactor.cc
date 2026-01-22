@@ -42,6 +42,8 @@ module;
 #include <any>
 #include <memory>
 #include <vector>
+#include <bit>
+#include <optional>
 
 #include <grp.h>
 #include <spawn.h>
@@ -3926,6 +3928,12 @@ reactor_options::reactor_options(program_options::option_group* parent_group)
                 "CPUs to use (in cpuset(7) format) for backend's async workers."
                 " Only applicable to, and required by, the asymmetric_io_uring reactor backend (see --reactor-backend)."
                 " Note that if the --cpuset is not set, using --async-workers-cpuset will restrict the CPUs for the SMP.")
+    , uring_buffer_ring_entries(*this, "uring-buffer-ring-entries", std::nullopt, "Count of buffers in the io_uring buffer ring"
+                " for reactor backend asymmetric uring. Must be a power of 2 and less than 32768. Specified together with uring-buffer-ring-size."
+                "If omitted, the buffer ring will not be used.")
+    , uring_buffer_ring_size(*this, "uring-buffer-ring-size", std::nullopt, "Buffer size in the io_uring buffer ring"
+                " for reactor backend asymmetric uring, in bytes (ex: 128k). Specified together with uring-buffer-ring-entries."
+                "If omitted, the buffer ring will not be used.")
     , aio_fsync(*this, "aio-fsync", kernel_supports_aio_fsync(),
                 "Use Linux aio for fsync() calls. This reduces latency; requires Linux 4.18 or later.")
     , max_networking_io_control_blocks(*this, "max-networking-io-control-blocks", 10000,
@@ -4498,6 +4506,33 @@ void smp::configure(const smp_options& smp_opts, const reactor_options& reactor_
                 reactor_opts.reserve_io_control_blocks.get_value());
     }
 
+    std::optional<uring_buffer_ring_config> buffer_ring_config;
+
+    if (reactor_opts.uring_buffer_ring_entries && reactor_opts.uring_buffer_ring_size) {
+        size_t size = parse_memory_size(reactor_opts.uring_buffer_ring_size.get_value());
+        
+        unsigned entries = reactor_opts.uring_buffer_ring_entries.get_value();
+        if (!std::has_single_bit(entries)) {
+            seastar_logger.error("io_uring buffer ring entries count must be a power of 2, got {}", entries);
+            exit(1);
+        }
+
+        // https://man7.org/linux/man-pages/man3/io_uring_register_buf_ring.3.html
+        constexpr unsigned io_uring_buf_ring_max_entries = 32768U;
+        if (entries > io_uring_buf_ring_max_entries) {
+            seastar_logger.error("io_uring buffer ring entries count must be lower than {}, got {}", io_uring_buf_ring_max_entries, entries);
+            exit(1);
+        }
+
+        buffer_ring_config.emplace(entries, size);
+    } else if (reactor_opts.uring_buffer_ring_entries) {
+        seastar_logger.error("io_uring buffer ring entries count set, but io_uring buffer ring buffer size missing. Please specify --uring-buffer-ring-size");
+        exit(1);
+    } else if (reactor_opts.uring_buffer_ring_size) {
+        seastar_logger.error("io_uring buffer ring buffer size set, but io_uring buffer ring entries count missing. Please specify --uring-buffer-ring-entries");
+        exit(1);
+    }
+
     reactor_config reactor_cfg = {
         .task_quota = std::chrono::duration_cast<sched_clock::duration>(reactor_opts.task_quota_ms.get_value() * 1ms),
         .max_poll_time = [&reactor_opts] () -> std::chrono::nanoseconds {
@@ -4521,6 +4556,7 @@ void smp::configure(const smp_options& smp_opts, const reactor_options& reactor_
         .no_poll_aio = !reactor_opts.poll_aio.get_value() || (reactor_opts.poll_aio.defaulted() && reactor_opts.overprovisioned),
         .aio_nowait_works = reactor_opts.linux_aio_nowait.get_value(), // Mixed in with filesystem-provided values later
         .abort_on_too_long_task_queue = reactor_opts.abort_on_too_long_task_queue.get_value(),
+        .buffer_ring_config = std::move(buffer_ring_config),
     };
 
     // Disable hot polling if sched wakeup granularity is too high
