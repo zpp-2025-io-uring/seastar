@@ -228,7 +228,9 @@ class TestPrometheus(unittest.TestCase):
         args = [cls.exporter_path,
                 '--port', f'{cls.port}',
                 '--conf', cls.exporter_config,
-                '--smp=2']
+                '--smp=2',
+                '--reactor-backend=asymmetric_io_uring',
+                '--async-workers-cpuset=0']
         cls.exporter_process = subprocess.Popen(args,
                                                 stdout=subprocess.PIPE,
                                                 stderr=subprocess.DEVNULL,
