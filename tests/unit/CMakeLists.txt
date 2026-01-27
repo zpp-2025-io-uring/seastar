@@ -838,3 +838,7 @@ seastar_add_test (gate
 seastar_add_test (test_fixture
   SOURCES
     test_fixture_test.cc)
+
+if (Seastar_IO_URING)
+  add_subdirectory (asymmetric_io_uring_backend)
+endif()

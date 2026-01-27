@@ -1,0 +1,31 @@
+%import common.ESCAPED_STRING
+%import common.DECIMAL
+%import common.INT
+%import common.WS
+%import common.C_COMMENT
+%import common.CNAME
+%ignore WS
+%ignore C_COMMENT
+
+# Tokens
+HEX: /0x[0-9A-Fa-f]+/
+TIMESTAMP: DECIMAL
+
+# Flag enum: one or more flag names / hex / CNAME separated by '|'
+flag_enum: (HEX | CNAME) ("|" (HEX | CNAME))*
+
+param_value: INT | HEX | flag_enum | struct | array
+
+param: CNAME "=" param_value
+struct: "{" param? ("," param)* "}"
+
+array: "[" param_value? ("," param_value)* "]"
+
+struct_or_array: struct | array
+
+io_uring_setup: "io_uring_setup" "(" INT "," struct ")" "=" INT
+io_uring_register: "io_uring_register" "(" INT "," CNAME "," struct_or_array "," INT ")" "=" INT
+syscall: io_uring_setup | io_uring_register
+
+# a line starts with a timestamp then a syscall
+line: TIMESTAMP syscall
