@@ -37,7 +37,7 @@ class TestJson2Code(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        args = [cls.rest_api_httpd, '--port', f'{cls.port}', '--smp=2']
+        args = [cls.rest_api_httpd, '--port', f'{cls.port}', '--smp=2', '--async-workers-cpuset=0']
         cls.server = subprocess.Popen(args,
                                       stdin=subprocess.PIPE,
                                       stdout=subprocess.PIPE,

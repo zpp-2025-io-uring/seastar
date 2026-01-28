@@ -64,7 +64,7 @@ target_link_libraries (app_memcached_test_ascii
 
 add_custom_target (app_memcached_test_ascii_run
   DEPENDS app_memcached_test_ascii
-  COMMAND app_memcached_test_ascii -- -c 2
+  COMMAND app_memcached_test_ascii -- -c 2 --async-workers-cpuset=0
   USES_TERMINAL)
 
 add_test (

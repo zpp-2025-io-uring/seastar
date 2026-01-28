@@ -537,10 +537,14 @@ sstring io_request::opname() const {
         return "vectored write";
     case io_request::operation::read:
         return "read";
+    case io_request::operation::uring_buf_group_read:
+        return "buffer group read";
     case io_request::operation::readv:
         return "vectored read";
     case io_request::operation::recv:
         return "recv";
+    case io_request::operation::uring_buf_group_recv:
+        return "buffer group recv";
     case io_request::operation::recvmsg:
         return "recvmsg";
     case io_request::operation::send:

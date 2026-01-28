@@ -25,7 +25,7 @@ import subprocess
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
 def run(args, cmd):
-    mc = subprocess.Popen([args.memcached, '--smp=2'])
+    mc = subprocess.Popen([args.memcached, '--smp=2', '--async-workers-cpuset=0'])
     print('Memcached started.')
     try:
         cmdline = [DIR_PATH + '/test_memcached.py'] + cmd
