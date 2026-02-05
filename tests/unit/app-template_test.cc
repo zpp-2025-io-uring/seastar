@@ -29,12 +29,19 @@
 using namespace seastar;
 using namespace std::chrono_literals;
 
+struct app_opts_fixture {
+    app_template::seastar_options opts;
+    app_opts_fixture() {
+        opts.reactor_opts.reactor_backend.select_candidate("asymmetric_io_uring");
+        opts.reactor_opts.async_workers_cpuset.set_value({2});
+    }
+};
+
 // #2148 - always run this.
-BOOST_AUTO_TEST_CASE(app_standard_memory_allocator) {
+BOOST_FIXTURE_TEST_CASE(app_standard_memory_allocator, app_opts_fixture) {
     // by default, use conservative settings instead of maxing out the performance
     // for testing app_template and underlying reactor's handling of different
     // settings
-    app_template::seastar_options opts;
     opts.smp_opts.thread_affinity.set_value(false);
     opts.smp_opts.mbind.set_value(false);
     opts.smp_opts.smp.set_value(1);
@@ -61,8 +68,8 @@ BOOST_AUTO_TEST_CASE(app_standard_memory_allocator) {
     BOOST_CHECK_EQUAL(actual_status, expected_status);
 }
 
-BOOST_AUTO_TEST_CASE(return_0_for_func_returning_void) {
-    app_template app;
+BOOST_FIXTURE_TEST_CASE(return_0_for_func_returning_void, app_opts_fixture) {
+    app_template app{std::move(opts)};
     std::string prog_name{"prog"};
     char* args[] = {prog_name.data()};
     int status = app.run(std::size(args), std::data(args),
@@ -70,8 +77,8 @@ BOOST_AUTO_TEST_CASE(return_0_for_func_returning_void) {
     BOOST_CHECK_EQUAL(status, 0);
 }
 
-BOOST_AUTO_TEST_CASE(return_status_for_func_returning_int) {
-    app_template app;
+BOOST_FIXTURE_TEST_CASE(return_status_for_func_returning_int, app_opts_fixture) {
+    app_template app{std::move(opts)};
     std::string prog_name{"prog"};
     char* args[] = {prog_name.data()};
     int expected_status = 42;

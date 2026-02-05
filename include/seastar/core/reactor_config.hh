@@ -21,9 +21,11 @@
 
 #pragma once
 
+#include <any>
 #include <seastar/util/program-options.hh>
 #include <seastar/util/memory_diagnostics.hh>
 #include <seastar/core/scheduling.hh>
+#include <seastar/core/resource.hh>
 
 namespace seastar {
 
@@ -43,6 +45,7 @@ struct reactor_config {
     bool no_poll_aio = false;
     bool aio_nowait_works = false;
     bool abort_on_too_long_task_queue = false;
+    std::variant<std::monostate, int, std::any> asymmetric_uring;
 };
 /// \endcond
 
@@ -157,9 +160,14 @@ struct reactor_options : public program_options::option_group {
     /// * \p linux-aio
     /// * \p epoll
     /// * \p io_uring
+    /// * \p asymmetric_io_uring
     ///
     /// Default: \p linux-aio (if available).
     program_options::selection_value<reactor_backend_selector> reactor_backend;
+    /// \brief CPUs to use (in cpuset(7) format) for backend's async workers. Used for asymmetric_io_uring.
+    ///
+    /// \note This option is only valid when the \p reactor_backend is set to \p asymmetric_io_uring.
+    program_options::value<resource::cpuset> async_workers_cpuset;
     /// \brief Use Linux aio for fsync() calls.
     ///
     /// This reduces latency. Requires Linux 4.18 or later.

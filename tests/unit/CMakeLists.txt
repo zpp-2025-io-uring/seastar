@@ -29,6 +29,12 @@ set (Seastar_UNIT_TEST_SMP
   STRING
   "Run unit tests with this many cores.")
 
+set (Seastar_UNIT_TEST_ASYNC_WORKERS_CPUSET
+  "2"
+  CACHE
+  STRING
+  "Run unit tests with this CPU set for async workers.")
+
 #
 # Define a new unit test with the given name.
 #
@@ -99,7 +105,7 @@ function (seastar_add_test name)
         list (APPEND args ${jenkins_args})
       endif ()
 
-      list (APPEND args -- -c ${Seastar_UNIT_TEST_SMP})
+      list (APPEND args -- -c ${Seastar_UNIT_TEST_SMP} --reactor-backend=asymmetric_io_uring --async-workers-cpuset ${Seastar_UNIT_TEST_ASYNC_WORKERS_CPUSET})
     elseif (parsed_args_KIND STREQUAL "BOOST")
       list (APPEND libraries
         Boost::unit_test_framework
@@ -195,7 +201,9 @@ endfunction ()
 # These kinds of tests are structured like Seastar applications.
 #
 # These tests always link against `seastar_private` and are always invoked with
-# `-c ${Seastar_UNIT_TEST_SMP}`.
+# `-c ${Seastar_UNIT_TEST_SMP}
+# --reactor-backend=asymmetric_io_uring
+# --async-workers-cpuset ${Seastar_UNIT_TEST_ASYNC_WORKERS_CPUSET}`.
 #
 function (seastar_add_app_test name)
   cmake_parse_arguments (parsed_args
@@ -212,6 +220,8 @@ function (seastar_add_app_test name)
       ${parsed_args_LIBRARIES}
     RUN_ARGS
       -c ${Seastar_UNIT_TEST_SMP}
+      --reactor-backend=asymmetric_io_uring
+      --async-workers-cpuset ${Seastar_UNIT_TEST_ASYNC_WORKERS_CPUSET}
       ${parsed_args_RUN_ARGS})
 endfunction ()
 
@@ -442,9 +452,7 @@ seastar_add_test (app-template
   SOURCES app-template_test.cc)
 
 seastar_add_test (socket
-  SOURCES socket_test.cc
-  # https://github.com/scylladb/seastar/issues/2302
-  RUN_ARGS --reactor-backend linux-aio)
+  SOURCES socket_test.cc)
 
 seastar_add_test (epoll
   SOURCES epoll_test.cc
