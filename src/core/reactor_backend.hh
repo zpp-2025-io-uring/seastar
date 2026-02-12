@@ -28,19 +28,29 @@
 #include <seastar/core/internal/poll.hh>
 #include <seastar/core/internal/linux-aio.hh>
 #include <seastar/core/cacheline.hh>
+#include <seastar/core/shard_id.hh>
 
 #include <fmt/ostream.h>
 #include <sys/time.h>
 #include <thread>
 #include <stack>
+#include <set>
 #include <boost/any.hpp>
 #include <boost/program_options.hpp>
 #include <boost/container/static_vector.hpp>
 
 
+#ifdef SEASTAR_HAVE_URING
+#include <liburing.h>
+#endif
+
 namespace seastar {
 
 class reactor;
+
+namespace resource {
+using cpuset = std::set<unsigned>;
+}
 
 // FIXME: merge it with storage context below. At this point the
 // main thing to do is unify the iocb list
@@ -336,6 +346,7 @@ public:
 };
 
 class reactor_backend_uring;
+class reactor_backend_asymmetric_uring;
 
 class reactor_backend_selector {
     std::string _name;
@@ -347,10 +358,43 @@ public:
     std::unique_ptr<reactor_backend> create(reactor& r);
     static reactor_backend_selector default_backend();
     static std::vector<reactor_backend_selector> available();
+
+    /// Assigns set of cpus for backends that need dedicated async workers.
+    /// Returns a pair (allocated CPUs, cpu_set \ allocated_cpus) for backends that need dedicated async workers
+    /// For backends that don't need dedicated async workers the pair returned is ({}, cpu_set)
+    /// Throws if async_workers_cpu_set is empty
+    std::pair<resource::cpuset, resource::cpuset> allocate_async_workers(const resource::cpuset& async_workers_cpu_set, const resource::cpuset& cpu_set) const;
+
     friend std::ostream& operator<<(std::ostream& os, const reactor_backend_selector& rbs) {
         return os << rbs._name;
     }
 };
+
+#ifdef SEASTAR_HAVE_URING
+
+/// Helper functions that manage the lifecycle and configuration of asymmetric io_uring backend
+/// Handles CPU allocation, worker thread management, and backend creation
+namespace uring {
+
+std::optional<::io_uring>
+try_create_attached_asymmetric_uring(int uring_fd, bool throw_on_error);
+
+std::optional<::io_uring>
+try_create_base_asymmetric_uring(unsigned worker_cpu, bool throw_on_error);
+
+unsigned
+select_worker_cpu(seastar::shard_id shard_id, const resource::cpuset& worker_cpus);
+
+bool is_master_shard(seastar::shard_id shard_id, const resource::cpuset& worker_cpus) noexcept;
+
+unsigned get_uring_group_id(seastar::shard_id shard_id, const resource::cpuset& worker_cpus) noexcept;
+
+inline constexpr unsigned QUEUE_LEN = 200;
+inline constexpr std::chrono::milliseconds POLLER_SLEEP_TIMEOUT(2000);
+
+} // namespace uring
+
+#endif // SEASTAR_HAVE_URING
 
 }
 
