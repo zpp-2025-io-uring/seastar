@@ -2821,11 +2821,11 @@ reactor_backend_selector reactor_backend_selector::default_backend() {
 std::vector<reactor_backend_selector> reactor_backend_selector::available() {
     std::vector<reactor_backend_selector> ret;
 #ifdef SEASTAR_HAVE_URING
-    if (detect_io_uring()) {
-        ret.push_back(reactor_backend_selector("io_uring"));
-    }
     if (detect_asymmetric_io_uring()) {
         ret.push_back(reactor_backend_selector("asymmetric_io_uring"));
+    }
+    if (detect_io_uring()) {
+        ret.push_back(reactor_backend_selector("io_uring"));
     }
 #endif
     if (has_enough_aio_nr() && detect_aio_poll()) {
@@ -2835,14 +2835,53 @@ std::vector<reactor_backend_selector> reactor_backend_selector::available() {
     return ret;
 }
 
+unsigned calculate_num_workers(const resource::cpuset& cpu_set, unsigned cores_per_worker) {
+    if (cores_per_worker == 0 || cpu_set.empty()) {
+        return 0;
+    }
+
+    auto res = cpu_set.size() / (cores_per_worker + 1);
+    if(res == 0){
+        // We don't wanna have 0 workers.
+        return 1;
+    }
+
+    return res;
+}
+
 std::pair<resource::cpuset, resource::cpuset> reactor_backend_selector::allocate_async_workers(const resource::cpuset& async_workers_cpu_set, const resource::cpuset& cpu_set) const {
 #ifdef SEASTAR_HAVE_URING
     if (_name == "asymmetric_io_uring") {
-        if (async_workers_cpu_set.empty()) {
-            throw std::runtime_error("No CPUs specified for asymmetric_io_uring workers. Please see --async-workers-cpuset option.");
+        if (!async_workers_cpu_set.empty()) {
+            return {async_workers_cpu_set, cpu_set};
+        }
+        seastar_logger.warn("Async workers cpuset was empty, but for benchmarking purpose, we'll allow it.");
+
+        constexpr unsigned CORES_PER_WORKER = 3;
+        unsigned num_workers = calculate_num_workers(cpu_set, CORES_PER_WORKER);
+        SEASTAR_ASSERT(num_workers !=0);
+        if (cpu_set.size() <= num_workers) {
+            throw std::runtime_error(
+                fmt::format("Asymmetric io_uring requires at least {} app core(s) + {} worker core(s), "
+                        "but only {} CPU(s) available",
+                        1, num_workers, cpu_set.size()));
+        }
+        
+        // Allocate last N cores for workers
+        resource::cpuset new_async_workers_cpu_set;
+        std::copy(cpu_set.crbegin(),
+                std::next(cpu_set.crbegin(), num_workers),
+                std::inserter(new_async_workers_cpu_set, new_async_workers_cpu_set.end()));
+        
+        // Remove calculated cores from the app's cpuset.
+        resource::cpuset new_cpuset = cpu_set;
+        for (auto cpu : new_async_workers_cpu_set) {
+            new_cpuset.erase(cpu);
         }
 
-        return {async_workers_cpu_set, cpu_set};
+        seastar_logger.warn("Calculated {} cpuset and {} cpuset for io_uring workers",
+                        fmt::join(new_cpuset, ","), fmt::join(new_async_workers_cpu_set, ","));
+        return {new_async_workers_cpu_set, new_cpuset};
     }
 #endif
     return {{}, cpu_set};  // Other backends don't need workers
