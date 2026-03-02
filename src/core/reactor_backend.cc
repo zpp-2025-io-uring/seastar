@@ -1560,6 +1560,10 @@ protected:
         });
     }
 
+    virtual void handle_ready_kernel_completion(kernel_completion* completion, ::io_uring_cqe* cqe) {
+        completion->complete_with(cqe->res);
+    }
+
     // Process kernel completions already extracted from the ring.
     // This is needed because we sometimes extract completions without
     // waiting, and sometimes with waiting.
@@ -1567,7 +1571,7 @@ protected:
         for (auto p = buf; p != buf + nr; ++p) {
             auto cqe = *p;
             auto completion = reinterpret_cast<kernel_completion*>(cqe->user_data);
-            completion->complete_with(cqe->res);
+            handle_ready_kernel_completion(completion, cqe);
         }
     }
 
