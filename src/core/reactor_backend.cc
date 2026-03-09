@@ -1203,7 +1203,10 @@ detect_io_uring() {
     return bool(ring_opt);
 }
 
-class reactor_backend_uring final : public reactor_backend {
+class reactor_backend_uring_base : public reactor_backend {
+};
+
+class reactor_backend_uring final : public reactor_backend_uring_base {
     reactor& _r;
     ::io_uring _uring;
     bool _did_work_while_getting_sqe = false;
