@@ -21,11 +21,16 @@
 
 #pragma once
 
+#include <any>
 #include <seastar/util/program-options.hh>
 #include <seastar/util/memory_diagnostics.hh>
 #include <seastar/core/scheduling.hh>
 
 namespace seastar {
+
+// Valid type when compiling without SEASTAR_HAVE_URING.
+// This avoids changing the size of a struct which contains it depending on conditional compilation.
+using compile_safe_io_uring = std::any;
 
 /// \cond internal
 struct reactor_config {
@@ -43,6 +48,7 @@ struct reactor_config {
     bool no_poll_aio = false;
     bool aio_nowait_works = false;
     bool abort_on_too_long_task_queue = false;
+    std::variant<std::monostate, int, compile_safe_io_uring> asymmetric_uring;
 };
 /// \endcond
 
