@@ -1222,7 +1222,14 @@ detect_io_uring() {
     return bool(ring_opt);
 }
 
-class reactor_backend_uring final : public reactor_backend {
+class reactor_backend_uring_base : public reactor_backend {
+    public:
+    reactor_backend_uring_base(uses_blocking_io blocking_io, supports_aio_fdatasync aio_fdatasync)
+        : reactor_backend(blocking_io, aio_fdatasync)
+    {}
+};
+
+class reactor_backend_uring final : public reactor_backend_uring_base {
     reactor& _r;
     ::io_uring _uring;
     bool _did_work_while_getting_sqe = false;
@@ -1456,7 +1463,7 @@ class reactor_backend_uring final : public reactor_backend {
     }
 public:
     explicit reactor_backend_uring(reactor& r)
-            : reactor_backend(uses_blocking_io::yes, supports_aio_fdatasync::yes)
+            : reactor_backend_uring_base(uses_blocking_io::yes, supports_aio_fdatasync::yes)
             , _r(r)
             , _uring(try_create_uring(uring::QUEUE_LEN, true).value())
             , _hrtimer_timerfd(make_timerfd())
