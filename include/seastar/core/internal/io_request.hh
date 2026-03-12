@@ -36,7 +36,7 @@ namespace internal {
 
 class io_request {
 public:
-    enum class operation : char { read, readv, write, writev, fdatasync, recv, recvmsg, send, sendmsg, accept, connect, poll_add, poll_remove, cancel };
+    enum class operation : char { read, uring_buf_group_read, readv, write, writev, fdatasync, recv, uring_buf_group_recv, recvmsg, send, sendmsg, accept, connect, poll_add, poll_remove, cancel };
 private:
     // the upper layers give us void pointers, but storing void pointers here is just
     // dangerous. The constructors seem to be happy to convert other pointers to void*,
@@ -50,6 +50,13 @@ private:
         uint64_t pos;
         char* addr;
         size_t size;
+    };
+    struct uring_buf_group_read_op {
+        operation op;
+        int fd;
+        uint64_t pos;
+        size_t size;
+        uint16_t buf_group;
     };
     struct readv_op {
         operation op;
@@ -65,6 +72,13 @@ private:
         char* addr;
         size_t size;
         int flags;
+    };
+    struct uring_buf_group_recv_op {
+        operation op;
+        int fd;
+        size_t size;
+        int flags;
+        uint16_t buf_group;
     };
     struct recvmsg_op {
         operation op;
@@ -111,8 +125,10 @@ private:
 
     union {
         read_op _read;
+        uring_buf_group_read_op _uring_buf_group_read;
         readv_op _readv;
         recv_op _recv;
+        uring_buf_group_recv_op _uring_buf_group_recv;
         recvmsg_op _recvmsg;
         send_op _send;
         sendmsg_op _sendmsg;
@@ -140,6 +156,18 @@ public:
         return req;
     }
 
+    static io_request make_uring_buf_group_read(int fd, uint64_t pos, size_t size, uint16_t buf_group)  {
+        io_request req;
+        req._uring_buf_group_read = {
+          .op = operation::uring_buf_group_read,
+          .fd = fd,
+          .pos = pos,
+          .size = size,
+          .buf_group = buf_group,
+        };
+        return req;
+    }
+
     static io_request make_readv(int fd, uint64_t pos, std::vector<iovec>& iov, bool nowait_works) {
         io_request req;
         req._readv = {
@@ -161,6 +189,18 @@ public:
           .addr = reinterpret_cast<char*>(address),
           .size = size,
           .flags = flags,
+        };
+        return req;
+    }
+
+    static io_request make_uring_buf_group_recv(int fd, size_t size, int flags, uint16_t buf_group) {
+        io_request req;
+        req._uring_buf_group_recv = {
+          .op = operation::uring_buf_group_recv,
+          .fd = fd,
+          .size = size,
+          .flags = flags,
+          .buf_group = buf_group,
         };
         return req;
     }
@@ -325,11 +365,17 @@ public:
         if constexpr (Op == operation::read) {
             return _read;
         }
+        if constexpr (Op == operation::uring_buf_group_read) {
+            return _uring_buf_group_read;
+        }
         if constexpr (Op == operation::readv) {
             return _readv;
         }
         if constexpr (Op == operation::recv) {
             return _recv;
+        }
+        if constexpr (Op == operation::uring_buf_group_recv) {
+            return _uring_buf_group_recv;
         }
         if constexpr (Op == operation::recvmsg) {
             return _recvmsg;
