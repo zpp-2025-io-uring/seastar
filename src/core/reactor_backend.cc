@@ -1946,7 +1946,8 @@ std::optional<::io_uring>
 try_create_asymmetric_uring_impl(::io_uring_params params, bool throw_on_error) {
     auto required_features =
             IORING_FEAT_SUBMIT_STABLE
-            | IORING_FEAT_NODROP;
+            | IORING_FEAT_NODROP
+            | IORING_FEAT_SQPOLL_NONFIXED;
     auto required_ops = {
             IORING_OP_POLL_ADD, // linux 5.1
             IORING_OP_READV,
@@ -2001,6 +2002,7 @@ try_create_asymmetric_uring_impl(::io_uring_params params, bool throw_on_error) 
 std::optional<::io_uring>
 try_create_attached_asymmetric_uring(int uring_fd, bool throw_on_error) {
     auto params = ::io_uring_params{};
+    params.flags |= IORING_SETUP_ATTACH_WQ | IORING_SETUP_SQPOLL;
     params.wq_fd = uring_fd;
     return try_create_asymmetric_uring_impl(params, throw_on_error);
 }
@@ -2014,6 +2016,10 @@ try_create_base_asymmetric_uring(unsigned worker_cpu, bool throw_on_error) {
     };
 
     auto params = ::io_uring_params{};
+    params.flags |= IORING_SETUP_SQPOLL | IORING_SETUP_SQ_AFF;
+    params.sq_thread_cpu = worker_cpu;
+    params.sq_thread_idle = std::chrono::duration_cast<std::chrono::milliseconds>(POLLER_SLEEP_TIMEOUT).count();
+
     auto maybe_uring = try_create_asymmetric_uring_impl(params, throw_on_error);
 
     if (!maybe_uring.has_value()) {

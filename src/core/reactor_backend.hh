@@ -398,6 +398,7 @@ try_create_base_asymmetric_uring(unsigned worker_cpu, bool throw_on_error);
 // issuing too small batches, too high and we require too much locked
 // memory, but otherwise it doesn't matter.
 inline constexpr unsigned QUEUE_LEN = 200;
+inline constexpr std::chrono::milliseconds POLLER_SLEEP_TIMEOUT(2000);
 
 } // namespace uring
 
