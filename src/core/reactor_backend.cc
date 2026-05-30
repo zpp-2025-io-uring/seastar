@@ -1208,7 +1208,7 @@ unsigned calculate_num_workers(const resource::cpuset& cpu_set, unsigned cores_p
 }
 
 static inline async_worker_allocation temp_allocate_async_workers(const resource::cpuset& async_workers_cpu_set, const resource::cpuset& cpu_set, bool is_asymmetric) {
-    seastar_logger.debug("Calculating async workers allocation for is_asymmetric: {}, async_workers_cpu_set: {}, cpu_set: {}", is_asymmetric, async_workers_cpu_set, cpu_set);
+    seastar_logger.debug("Calculating async workers allocation for is_asymmetric: {}, async_workers_cpu_set: [{}], cpu_set: [{}]", is_asymmetric, fmt::join(async_workers_cpu_set, ","), fmt::join(cpu_set, ","));
     resource::cpuset new_async_workers_cpu_set;
     resource::cpuset new_cpuset;
     if (async_workers_cpu_set.empty()) {
