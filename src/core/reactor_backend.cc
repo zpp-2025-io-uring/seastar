@@ -2259,7 +2259,7 @@ class asymmetric_uring_reactor_backend_configurator : public reactor_backend_con
     /// Throws if async_workers_cpu_set is empty
     void allocate_async_workers(const reactor_options& reactor_opts, const smp_options& smp_opts) {
         auto async_workers_cpu_set = reactor_opts.async_workers_cpuset ? reactor_opts.async_workers_cpuset.get_value() : resource::cpuset{};
-        auto pair = temp_allocate_async_workers(async_workers_cpu_set, _cpu_set, false);
+        auto pair = temp_allocate_async_workers(async_workers_cpu_set, _cpu_set, true);
         _async_workers_cpuset = std::move(pair.async_workers_cpuset);
         _cpu_set = std::move(pair.reactor_cpuset);
     }
@@ -2269,6 +2269,10 @@ public:
         : _cpu_set(std::move(cpu_set))
         , _async_workers_cpuset(reactor_opts.async_workers_cpuset.get_value())
     {
+        // Capture the number of shards from _cpu_set BEFORE allocate_async_workers modifies it
+        const unsigned original_cpu_set_size = _cpu_set.size();
+        const unsigned num_shards = smp_opts.smp ? smp_opts.smp.get_value() : original_cpu_set_size;
+        
         allocate_async_workers(reactor_opts, smp_opts);
 
         seastar_logger.debug("Backend async workers allocated: {} potential app cores [{}], {} worker cores [{}]",
@@ -2276,7 +2280,7 @@ public:
                 _async_workers_cpuset.size(), fmt::join(_async_workers_cpuset, ","));
 
         _master_uring_fds.resize(_async_workers_cpuset.size(), -1);
-        _init_data.resize(_cpu_set.size() + _async_workers_cpuset.size(), uring_groups_init_result{});
+        _init_data.resize(num_shards, uring_groups_init_result{});
     }
 
     virtual const resource::cpuset& configured_cpuset() const override {
