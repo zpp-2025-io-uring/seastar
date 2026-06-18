@@ -43,6 +43,8 @@ jobs:
           openssl-dev        \
           protobuf-dev       \
           py3-yaml           \
+          py3-pytest         \
+          py3-lark-parser    \
           ragel              \
           samurai            \
           util-linux-dev     \
